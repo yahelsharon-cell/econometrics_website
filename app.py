@@ -4,6 +4,7 @@ import statsmodels.api as sm
 import matplotlib.pyplot as plt
 import seaborn as sns
 import plotly.express as px
+import numpy as np
 import io
 
 # ── Page config ───────────────────────────────────────────────────────────────
@@ -102,7 +103,7 @@ with st.sidebar:
 # ── Main content ──────────────────────────────────────────────────────────────
 st.title("📊 Data Analytics Dashboard")
 
-tab1, tab2 = st.tabs(["📈 Descriptives", "🧮 Regression"])
+tab1, tab2, tab3 = st.tabs(["📈 Descriptives", "🔧 Variable Builder", "🧮 Regression"])
 
 # ════════════════════════════════════════════════════════════════════════════
 #  TAB 1 — DESCRIPTIVES
@@ -175,9 +176,121 @@ with tab1:
             plt.close(fig)
 
 # ════════════════════════════════════════════════════════════════════════════
-#  TAB 2 — REGRESSION
+#  TAB 2 — VARIABLE BUILDER
 # ════════════════════════════════════════════════════════════════════════════
 with tab2:
+    if 'df' not in st.session_state:
+        st.warning("Upload a CSV file in the sidebar to get started.")
+    else:
+        df = st.session_state['df']
+        numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
+
+        st.subheader("Variable Builder")
+        st.caption(
+            "Combine or transform existing numeric columns to create a new variable. "
+            "Once created, it will be available in the Regression tab."
+        )
+
+        if not numeric_cols:
+            st.error("No numeric columns found in the dataset.")
+        else:
+            # ── Inputs ───────────────────────────────────────────────────────
+            col_name, col_op = st.columns(2)
+            with col_name:
+                new_var_name = st.text_input("New Variable Name", placeholder="e.g., log_income")
+            with col_op:
+                operation = st.selectbox(
+                    "Operation",
+                    options=[
+                        "Add  (A + B)",
+                        "Subtract  (A − B)",
+                        "Multiply  (A × B)",
+                        "Divide  (A ÷ B)",
+                        "Natural Log  (ln A)",
+                    ],
+                )
+
+            is_unary = operation.startswith("Natural Log")
+
+            col_a, col_b = st.columns(2)
+            with col_a:
+                var_a = st.selectbox("Variable A", options=numeric_cols, key="vb_var_a")
+            with col_b:
+                if not is_unary:
+                    b_options = [c for c in numeric_cols if c != var_a]
+                    var_b = st.selectbox("Variable B", options=b_options, key="vb_var_b")
+                else:
+                    st.markdown(
+                        "<div style='padding-top:28px;color:#636366;font-size:13px;'>"
+                        "Applies ln() to Variable A only.</div>",
+                        unsafe_allow_html=True,
+                    )
+                    var_b = None
+
+            # ── Create button ─────────────────────────────────────────────────
+            if st.button("➕  Create Variable", type="primary"):
+                name = new_var_name.strip()
+                if not name:
+                    st.error("Please enter a name for the new variable.")
+                elif name in df.columns:
+                    st.warning(f"A column named **{name}** already exists. Choose a different name.")
+                else:
+                    try:
+                        if operation.startswith("Add"):
+                            df[name] = df[var_a] + df[var_b]
+                        elif operation.startswith("Subtract"):
+                            df[name] = df[var_a] - df[var_b]
+                        elif operation.startswith("Multiply"):
+                            df[name] = df[var_a] * df[var_b]
+                        elif operation.startswith("Divide"):
+                            if (df[var_b] == 0).any():
+                                st.error(
+                                    f"**{var_b}** contains zeros — division by zero would produce "
+                                    "infinite values. Choose a different variable or clean the data first."
+                                )
+                                st.stop()
+                            df[name] = df[var_a] / df[var_b]
+                        elif is_unary:
+                            if (df[var_a] <= 0).any():
+                                st.error(
+                                    f"**{var_a}** contains zero or negative values. "
+                                    "Natural log requires strictly positive values."
+                                )
+                                st.stop()
+                            df[name] = np.log(df[var_a])
+
+                        st.session_state['df'] = df
+                        st.success(
+                            f"✅ **{name}** created successfully and added to the dataset. "
+                            "It is now available as a variable in the Regression tab."
+                        )
+                        st.rerun()
+
+                    except Exception as e:
+                        st.error(f"Failed to create variable: {e}")
+
+            # ── Created variables table ───────────────────────────────────────
+            original_cols = set(st.session_state['df_raw'].columns) if 'df_raw' in st.session_state else set()
+            custom_cols   = [c for c in df.columns if c not in original_cols]
+
+            if custom_cols:
+                st.markdown("---")
+                st.markdown("#### Created Variables")
+                preview = df[custom_cols].describe().T[['mean', 'min', 'max', 'std']].round(4)
+                st.dataframe(preview, use_container_width=True)
+
+                with st.expander("Remove a created variable"):
+                    to_remove = st.selectbox("Select variable to remove", options=custom_cols, key="vb_remove")
+                    if st.button("🗑  Remove Variable", key="vb_remove_btn"):
+                        df = st.session_state['df'].drop(columns=[to_remove])
+                        st.session_state['df'] = df
+                        st.success(f"**{to_remove}** removed.")
+                        st.rerun()
+
+# ════════════════════════════════════════════════════════════════════════════
+#  TAB 3 — REGRESSION
+# ════════════════════════════════════════════════════════════════════════════
+with tab3:
     if 'df' not in st.session_state:
         st.warning("Upload data first using the sidebar.")
     elif not st.session_state.get('x_vars'):
