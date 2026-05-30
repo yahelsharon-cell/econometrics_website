@@ -1,4 +1,5 @@
 **Econometrics & Data Analytics Web App**
+
 Built using Python and Streamlit, this platform eliminates manual data manipulation by allowing users to upload raw CSV/Excel files and instantly extract statistical insights, run regressions, and spot anomalies.
 
 🚀 Live Demo
